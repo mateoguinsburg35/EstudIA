@@ -21,7 +21,7 @@ function fusionarDatos(local, remoto) {
     eliminados[id] = Math.max(eliminados[id] || 0, momento);
   }
   const resultado = { eliminados };
-  for (const coleccion of ["materias", "tareas", "examenes"]) {
+  for (const coleccion of COLECCIONES) {
     const porId = new Map();
     for (const item of [...(remoto[coleccion] || []), ...(local[coleccion] || [])]) {
       const actual = porId.get(item.id);

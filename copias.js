@@ -16,6 +16,7 @@ function leerCopia(texto) {
   const origen = copia?.datos;
   if (copia?.aplicacion !== "EstudIA" || !origen) throw new Error("El archivo no es una copia de EstudIA.");
   for (const nombre of COLECCIONES) {
+    origen[nombre] ??= []; // las copias antiguas no tienen horarios
     const valido = Array.isArray(origen[nombre]) && origen[nombre].every((item) => item && typeof item.id === "string");
     if (!valido) throw new Error("La copia está dañada o incompleta.");
   }
@@ -67,6 +68,6 @@ function seccionCopias() {
 function avisoDeCopia() {
   const hayDatos = datos.materias.length || datos.tareas.length || datos.examenes.length;
   const protegido = sesion || leerMeta().ultimaCopia > Date.now() - 14 * 86400000;
-  if (!hayDatos || protegido) return "";
+  if (!hayDatos || protegido || enModoNoMolestar()) return "";
   return `<p class="nota">Tus datos solo están en este dispositivo. <button class="boton chico" data-accion="ir" data-vista="datos">Protegerlos</button></p>`;
 }

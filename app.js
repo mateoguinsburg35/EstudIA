@@ -13,13 +13,14 @@ const COLORES_MATERIA = ["#3347E0", "#D6336C", "#1F8A5B", "#B36B00", "#7B3FE4", 
 const DIAS_SEMANA = ["lun", "mar", "mié", "jue", "vie", "sáb", "dom"];
 
 /* ===== 2. Estado y almacenamiento ===== */
-const COLECCIONES = ["materias", "tareas", "examenes"];
+const COLECCIONES = ["materias", "tareas", "examenes", "horarios"];
 const CLAVE_META = "estudia:meta:v1"; // datos propios de este dispositivo (no se sincronizan)
-let datos = { materias: [], tareas: [], examenes: [], eliminados: {} };
+let datos = { materias: [], tareas: [], examenes: [], horarios: [], eliminados: {} };
 let vistaActual = "inicio";
 let mesVisible = primerDiaDelMes(new Date());
 let diaSeleccionado = hoyIso();
 let temporizadorAviso = null;
+let accionDeshacer = null;
 
 function cargarDatos() {
   try {
@@ -28,6 +29,7 @@ function cargarDatos() {
       datos.materias = guardado.materias || [];
       datos.tareas = guardado.tareas || [];
       datos.examenes = guardado.examenes || [];
+      datos.horarios = guardado.horarios || [];
       datos.eliminados = guardado.eliminados || {};
       asegurarMarcasDeModificacion();
     }
@@ -127,12 +129,15 @@ function capitalizar(texto) {
   return texto.charAt(0).toUpperCase() + texto.slice(1);
 }
 
-function mostrarAviso(texto) {
+/* Con "No molestar" activo se retienen los avisos, salvo los que traen un "Deshacer". */
+function mostrarAviso(texto, deshacer) {
+  if (enModoNoMolestar() && !deshacer) { enfoque.avisos.push(texto); return; }
   const aviso = document.getElementById("aviso");
-  aviso.textContent = texto;
+  accionDeshacer = deshacer || null;
+  aviso.innerHTML = `<span>${escaparHtml(texto)}</span>${deshacer ? `<button class="boton chico" data-accion="deshacer">Deshacer</button>` : ""}`;
   aviso.hidden = false;
   clearTimeout(temporizadorAviso);
-  temporizadorAviso = setTimeout(() => { aviso.hidden = true; }, 3500);
+  temporizadorAviso = setTimeout(() => { aviso.hidden = true; accionDeshacer = null; }, deshacer ? 7000 : 3500);
 }
 
 /* ===== 4. Consultas sobre los datos ===== */
@@ -196,11 +201,21 @@ function textoFecha(iso, resaltarVencida) {
   return `<span class="${vencida ? "vencida" : ""}">${formatearFecha(iso)} (${textoDias(diasHasta(iso))})</span>`;
 }
 
+/* Convierte los enlaces http(s) de una descripción en vínculos, escapando antes el resto del texto. */
+function enlazar(texto) {
+  return escaparHtml(texto).replace(/https?:\/\/[^\s<]+/g, (url) =>
+    `<a href="${url}" target="_blank" rel="noopener noreferrer">${url.length > 45 ? url.slice(0, 42) + "…" : url}</a>`);
+}
+
+function descripcionHtml(item) {
+  return item.descripcion ? `<div class="descripcion">${enlazar(item.descripcion)}</div>` : "";
+}
+
 function filaTarea(tarea, conControles) {
   return `<li class="fila${tarea.completada ? " hecha" : ""}">
     <input type="checkbox" class="casilla" aria-label="Completada" data-accion="alternar-tarea" data-id="${tarea.id}"${tarea.completada ? " checked" : ""}>
     <div class="fila-texto"><strong>${escaparHtml(tarea.titulo)}</strong>
-      <div class="meta">${etiquetaMateria(tarea.materiaId)}<span>${escaparHtml(tarea.tipo)}</span>${textoFecha(tarea.fecha, !tarea.completada)}</div></div>
+      <div class="meta">${etiquetaMateria(tarea.materiaId)}<span>${escaparHtml(tarea.tipo)}</span>${textoFecha(tarea.fecha, !tarea.completada)}</div>${descripcionHtml(tarea)}</div>
     <div class="acciones">${conControles ? selectorPrioridad("tarea", tarea.id, tarea.prioridad) + botonesEdicion("tarea", tarea.id) : etiquetaPrioridad(tarea.prioridad)}</div>
   </li>`;
 }
@@ -210,7 +225,7 @@ function filaExamen(examen, conControles) {
   return `<li class="fila">
     <span class="marca-color" style="--c:${escaparHtml(materia ? materia.color : "#5B6480")}" title="Examen"></span>
     <div class="fila-texto"><strong>Examen: ${escaparHtml(examen.titulo)}</strong>
-      <div class="meta">${etiquetaMateria(examen.materiaId)}${textoFecha(examen.fecha, false)}</div></div>
+      <div class="meta">${etiquetaMateria(examen.materiaId)}${textoFecha(examen.fecha, false)}</div>${descripcionHtml(examen)}</div>
     <div class="acciones">${conControles ? selectorPrioridad("examen", examen.id, examen.prioridad) + botonesEdicion("examen", examen.id) : etiquetaPrioridad(examen.prioridad)}</div>
   </li>`;
 }
@@ -236,7 +251,7 @@ function vistaInicio() {
   const pendientes = tareasPendientes();
   const titular = total ? `Completaste el ${porcentaje} % de tus tareas` : "Todavía no cargaste tareas";
 
-  const filasHoy = [...hoy.examenes.map((e) => filaExamen(e, false)), ...hoy.tareas.map((t) => filaTarea(t, false))];
+  const filasHoy = [...clasesDeHoy().map((c) => filaClase(c, false)), ...hoy.examenes.map((e) => filaExamen(e, false)), ...hoy.tareas.map((t) => filaTarea(t, false))];
   const fechaHoy = capitalizar(formatearFecha(hoyIso(), { weekday: "long", day: "numeric", month: "long" }));
 
   return `${encabezado("Inicio", fechaHoy)}${avisoDeCopia()}
@@ -305,19 +320,11 @@ function vistaCalendario() {
 }
 
 function vistaTareas() {
-  return `${encabezado("Tareas", "Tareas y trabajos prácticos", BOTON_NUEVA_TAREA)}
-    <h2>Pendientes</h2>
-    ${listaDeFilas(tareasPendientes().map((t) => filaTarea(t, true)), "No tenés tareas pendientes.")}
-    <h2>Completadas</h2>
-    ${listaDeFilas(tareasCompletadas().map((t) => filaTarea(t, true)), "Todavía no completaste ninguna tarea.")}`;
+  return `${encabezado("Tareas", "Tareas y trabajos prácticos", BOTON_NUEVA_TAREA)}${barraFiltros("tareas")}<div id="resultados">${resultadosTareas()}</div>`;
 }
 
 function vistaExamenes() {
-  return `${encabezado("Exámenes", "Fechas de evaluación por materia", BOTON_NUEVO_EXAMEN)}
-    <h2>Próximos</h2>
-    ${listaDeFilas(examenesProximos().map((e) => filaExamen(e, true)), "No hay exámenes próximos.")}
-    <h2>Pasados</h2>
-    ${listaDeFilas(examenesPasados().map((e) => filaExamen(e, true)), "No hay exámenes pasados.")}`;
+  return `${encabezado("Exámenes", "Fechas de evaluación por materia", BOTON_NUEVO_EXAMEN)}${barraFiltros("examenes")}<div id="resultados">${resultadosExamenes()}</div>`;
 }
 
 function vistaMaterias() {
@@ -341,6 +348,8 @@ const VISTAS = {
   tareas: vistaTareas,
   examenes: vistaExamenes,
   materias: vistaMaterias,
+  horario: vistaHorario,
+  enfoque: vistaEnfoque,
   datos: vistaDatos
 };
 
@@ -349,12 +358,13 @@ function vistaDatos() {
 }
 
 function render() {
-  document.querySelectorAll(".menu [data-vista]").forEach((boton) => {
+  document.querySelectorAll(".menu nav [data-vista]").forEach((boton) => {
     const activa = boton.dataset.vista === vistaActual;
     boton.classList.toggle("activa", activa);
     if (activa) boton.setAttribute("aria-current", "page"); else boton.removeAttribute("aria-current");
   });
   document.getElementById("contenido").innerHTML = VISTAS[vistaActual]();
+  actualizarReloj();
 }
 
 /* ===== 7. Formularios (ventana de diálogo) ===== */
@@ -362,10 +372,16 @@ function abrirFormulario({ titulo, mensaje = "", campos = [], valores = {}, text
   const dialogo = document.getElementById("dialogo");
   const camposHtml = campos.map((campo) => {
     const valor = valores[campo.nombre] ?? "";
-    const control = campo.tipo === "select"
-      ? `<select name="${campo.nombre}" required>${campo.opciones.map((o) =>
-          `<option value="${escaparHtml(o.valor)}"${o.valor === valor ? " selected" : ""}>${escaparHtml(o.texto)}</option>`).join("")}</select>`
-      : `<input name="${campo.nombre}" type="${campo.tipo}" value="${escaparHtml(valor)}" required${campo.tipo === "text" ? ' maxlength="80" autocomplete="off"' : ""}>`;
+    const requerido = campo.opcional ? "" : " required";
+    let control;
+    if (campo.tipo === "select") {
+      control = `<select name="${campo.nombre}">${campo.opciones.map((o) =>
+        `<option value="${escaparHtml(o.valor)}"${o.valor === valor ? " selected" : ""}>${escaparHtml(o.texto)}</option>`).join("")}</select>`;
+    } else if (campo.tipo === "textarea") {
+      control = `<textarea name="${campo.nombre}" rows="3" maxlength="1500">${escaparHtml(valor)}</textarea>`;
+    } else {
+      control = `<input name="${campo.nombre}" type="${campo.tipo}" value="${escaparHtml(valor)}"${requerido}${campo.tipo === "text" ? ' maxlength="80" autocomplete="off"' : ""}>`;
+    }
     return `<label>${campo.etiqueta}${control}</label>`;
   }).join("");
 
@@ -382,10 +398,6 @@ function abrirFormulario({ titulo, mensaje = "", campos = [], valores = {}, text
     alGuardar(valoresIngresados);
   });
   dialogo.showModal();
-}
-
-function confirmarEliminacion(mensaje, alAceptar) {
-  abrirFormulario({ titulo: "Eliminar", mensaje, textoBoton: "Eliminar", peligro: true, alGuardar: alAceptar });
 }
 
 function opcionesDeMaterias() {
@@ -417,25 +429,46 @@ function formularioMateria(materia) {
   });
 }
 
+const OPCIONES_REPETICION = [
+  { valor: "1", texto: "No se repite" },
+  { valor: "4", texto: "Todas las semanas, 4 veces" },
+  { valor: "8", texto: "Todas las semanas, 8 veces" },
+  { valor: "16", texto: "Todas las semanas, 16 veces (cuatrimestre)" }
+];
+
 function formularioTarea(tarea) {
   if (!hayMaterias()) return;
   const fechaInicial = vistaActual === "calendario" ? diaSeleccionado : hoyIso();
+  const campos = [
+    { nombre: "titulo", etiqueta: "Título", tipo: "text" },
+    { nombre: "tipo", etiqueta: "Tipo", tipo: "select", opciones: TIPOS_TAREA.map((t) => ({ valor: t, texto: t })) },
+    { nombre: "materiaId", etiqueta: "Materia", tipo: "select", opciones: opcionesDeMaterias() },
+    { nombre: "fecha", etiqueta: "Fecha de entrega", tipo: "date" },
+    { nombre: "prioridad", etiqueta: "Prioridad", tipo: "select", opciones: PRIORIDADES.map((p) => ({ valor: p.valor, texto: p.texto })) },
+    { nombre: "descripcion", etiqueta: "Descripción o enlaces (consigna, material)", tipo: "textarea", opcional: true }
+  ];
+  if (!tarea) campos.push({ nombre: "repeticiones", etiqueta: "Repetición", tipo: "select", opciones: OPCIONES_REPETICION });
   abrirFormulario({
     titulo: tarea ? "Editar tarea" : "Nueva tarea",
-    campos: [
-      { nombre: "titulo", etiqueta: "Título", tipo: "text" },
-      { nombre: "tipo", etiqueta: "Tipo", tipo: "select", opciones: TIPOS_TAREA.map((t) => ({ valor: t, texto: t })) },
-      { nombre: "materiaId", etiqueta: "Materia", tipo: "select", opciones: opcionesDeMaterias() },
-      { nombre: "fecha", etiqueta: "Fecha de entrega", tipo: "date" },
-      { nombre: "prioridad", etiqueta: "Prioridad", tipo: "select", opciones: PRIORIDADES.map((p) => ({ valor: p.valor, texto: p.texto })) }
-    ],
-    valores: tarea || { tipo: TIPOS_TAREA[0], materiaId: datos.materias[0].id, fecha: fechaInicial, prioridad: "media" },
+    campos,
+    valores: tarea || { tipo: TIPOS_TAREA[0], materiaId: datos.materias[0].id, fecha: fechaInicial, prioridad: "media", repeticiones: "1" },
     alGuardar(valores) {
-      if (tarea) Object.assign(tarea, estampar(valores));
-      else datos.tareas.push({ id: nuevoId(), completada: false, ...estampar(valores) });
+      const { repeticiones, ...datosTarea } = valores;
+      if (tarea) Object.assign(tarea, estampar(datosTarea));
+      else crearTareasSemanales(datosTarea, Number(repeticiones));
       guardarYRenderizar();
     }
   });
+}
+
+/* Crea una tarea independiente por semana, desde la fecha elegida. */
+function crearTareasSemanales(base, veces) {
+  for (let semana = 0; semana < veces; semana++) {
+    const fecha = isoAFecha(base.fecha);
+    fecha.setDate(fecha.getDate() + 7 * semana);
+    datos.tareas.push({ id: nuevoId(), completada: false, ...estampar({ ...base, fecha: fechaAIso(fecha) }) });
+  }
+  if (veces > 1) mostrarAviso(`Se crearon ${veces} tareas semanales.`);
 }
 
 function formularioExamen(examen) {
@@ -447,7 +480,8 @@ function formularioExamen(examen) {
       { nombre: "titulo", etiqueta: "Título", tipo: "text" },
       { nombre: "materiaId", etiqueta: "Materia", tipo: "select", opciones: opcionesDeMaterias() },
       { nombre: "fecha", etiqueta: "Fecha del examen", tipo: "date" },
-      { nombre: "prioridad", etiqueta: "Prioridad", tipo: "select", opciones: PRIORIDADES.map((p) => ({ valor: p.valor, texto: p.texto })) }
+      { nombre: "prioridad", etiqueta: "Prioridad", tipo: "select", opciones: PRIORIDADES.map((p) => ({ valor: p.valor, texto: p.texto })) },
+      { nombre: "descripcion", etiqueta: "Descripción o enlaces (temas, material)", tipo: "textarea", opcional: true }
     ],
     valores: examen || { materiaId: datos.materias[0].id, fecha: fechaInicial, prioridad: "alta" },
     alGuardar(valores) {
@@ -458,26 +492,31 @@ function formularioExamen(examen) {
   });
 }
 
-function eliminarMateria(materia) {
-  const tareas = datos.tareas.filter((t) => t.materiaId === materia.id).length;
-  const examenes = datos.examenes.filter((e) => e.materiaId === materia.id).length;
-  const detalle = tareas || examenes ? ` También se eliminarán sus ${tareas} tareas y ${examenes} exámenes.` : "";
-  confirmarEliminacion(`¿Eliminar la materia “${escaparHtml(materia.nombre)}”?${detalle}`, () => {
-    registrarEliminaciones([materia, ...datos.tareas.filter((t) => t.materiaId === materia.id), ...datos.examenes.filter((e) => e.materiaId === materia.id)]);
-    datos.materias = datos.materias.filter((m) => m.id !== materia.id);
-    datos.tareas = datos.tareas.filter((t) => t.materiaId !== materia.id);
-    datos.examenes = datos.examenes.filter((e) => e.materiaId !== materia.id);
+/* Elimina al instante y ofrece deshacer: al restaurar se reponen los elementos y se anula su marca de eliminación. */
+function eliminarConDeshacer(elementos, mensaje) {
+  registrarEliminaciones(elementos.map((e) => e.item));
+  elementos.forEach(({ coleccion, item }) => { datos[coleccion] = datos[coleccion].filter((x) => x.id !== item.id); });
+  guardarYRenderizar();
+  mostrarAviso(mensaje, () => {
+    elementos.forEach(({ coleccion, item }) => {
+      delete datos.eliminados[item.id];
+      datos[coleccion].push({ ...item, modificado: Date.now() });
+    });
     guardarYRenderizar();
   });
 }
 
+function eliminarMateria(materia) {
+  const asociados = ["tareas", "examenes", "horarios"].flatMap((coleccion) =>
+    datos[coleccion].filter((item) => item.materiaId === materia.id).map((item) => ({ coleccion, item })));
+  const detalle = asociados.length ? ` y ${asociados.length} actividades asociadas` : "";
+  eliminarConDeshacer([{ coleccion: "materias", item: materia }, ...asociados], `Se eliminó la materia “${materia.nombre}”${detalle}.`);
+}
+
 function eliminarElemento(coleccion, id, descripcion) {
-  const elemento = datos[coleccion].find((e) => e.id === id);
-  confirmarEliminacion(`¿Eliminar ${descripcion} “${escaparHtml(elemento.titulo)}”?`, () => {
-    registrarEliminaciones([elemento]);
-    datos[coleccion] = datos[coleccion].filter((e) => e.id !== id);
-    guardarYRenderizar();
-  });
+  const item = datos[coleccion].find((e) => e.id === id);
+  const nombre = item.titulo ?? materiaPorId(item.materiaId)?.nombre ?? "";
+  eliminarConDeshacer([{ coleccion, item }], `Se eliminó ${descripcion} “${nombre}”.`);
 }
 
 /* ===== 8. Acciones y eventos ===== */
@@ -498,6 +537,13 @@ const ACCIONES = {
   "nuevo-examen": () => formularioExamen(null),
   "editar-examen": ({ id }) => formularioExamen(datos.examenes.find((e) => e.id === id)),
   "eliminar-examen": ({ id }) => eliminarElemento("examenes", id, "el examen"),
+  "deshacer": () => { accionDeshacer?.(); accionDeshacer = null; document.getElementById("aviso").hidden = true; },
+  "nueva-clase": () => formularioClase(null),
+  "editar-horario": ({ id }) => formularioClase(datos.horarios.find((c) => c.id === id)),
+  "eliminar-horario": ({ id }) => eliminarElemento("horarios", id, "la clase"),
+  "enfoque-iniciar": () => iniciarEnfoque(),
+  "enfoque-pausar": () => pausarEnfoque(),
+  "enfoque-reiniciar": () => reiniciarEnfoque(),
   "iniciar-sesion": () => formularioInicioSesion(),
   "cerrar-sesion": () => cerrarSesion(),
   "sincronizar": () => sincronizarAhora(),
