@@ -1,0 +1,547 @@
+"use strict";
+
+/* ===== 1. Constantes ===== */
+const CLAVE_ALMACENAMIENTO = "estudia:v1";
+const PRIORIDADES = [
+  { valor: "alta", texto: "Alta" },
+  { valor: "media", texto: "Media" },
+  { valor: "baja", texto: "Baja" }
+];
+const PESO_PRIORIDAD = { alta: 0, media: 1, baja: 2 };
+const TIPOS_TAREA = ["Tarea", "Trabajo práctico"];
+const COLORES_MATERIA = ["#3347E0", "#D6336C", "#1F8A5B", "#B36B00", "#7B3FE4", "#0E7C93", "#B5451B", "#5B6480"];
+const DIAS_SEMANA = ["lun", "mar", "mié", "jue", "vie", "sáb", "dom"];
+
+/* ===== 2. Estado y almacenamiento ===== */
+const COLECCIONES = ["materias", "tareas", "examenes"];
+const CLAVE_META = "estudia:meta:v1"; // datos propios de este dispositivo (no se sincronizan)
+let datos = { materias: [], tareas: [], examenes: [], eliminados: {} };
+let vistaActual = "inicio";
+let mesVisible = primerDiaDelMes(new Date());
+let diaSeleccionado = hoyIso();
+let temporizadorAviso = null;
+
+function cargarDatos() {
+  try {
+    const guardado = JSON.parse(localStorage.getItem(CLAVE_ALMACENAMIENTO));
+    if (guardado) {
+      datos.materias = guardado.materias || [];
+      datos.tareas = guardado.tareas || [];
+      datos.examenes = guardado.examenes || [];
+      datos.eliminados = guardado.eliminados || {};
+      asegurarMarcasDeModificacion();
+    }
+  } catch (error) {
+    console.error("No se pudieron leer los datos guardados:", error);
+  }
+}
+
+/* Cada elemento lleva la hora de su última modificación; la sincronización la usa para fusionar. */
+function asegurarMarcasDeModificacion() {
+  let hubo = false;
+  COLECCIONES.forEach((nombre) => datos[nombre].forEach((item) => {
+    if (!item.modificado) { item.modificado = Date.now(); hubo = true; }
+  }));
+  if (hubo) guardarLocal();
+}
+
+function estampar(valores) {
+  return { ...valores, modificado: Date.now() };
+}
+
+function registrarEliminaciones(elementos) {
+  elementos.forEach((elemento) => { datos.eliminados[elemento.id] = Date.now(); });
+}
+
+function leerMeta() {
+  try { return JSON.parse(localStorage.getItem(CLAVE_META)) || {}; } catch (error) { return {}; }
+}
+
+function guardarMeta(cambios) {
+  try { localStorage.setItem(CLAVE_META, JSON.stringify({ ...leerMeta(), ...cambios })); } catch (error) { /* sin almacenamiento */ }
+}
+
+function guardarLocal() {
+  try {
+    localStorage.setItem(CLAVE_ALMACENAMIENTO, JSON.stringify(datos));
+  } catch (error) {
+    mostrarAviso("No se pudo guardar en este navegador. Los cambios se perderán al cerrar.");
+  }
+}
+
+function guardarDatos() {
+  guardarLocal();
+  programarSincronizacion();
+}
+
+function guardarYRenderizar() {
+  guardarDatos();
+  render();
+}
+
+/* ===== 3. Utilidades ===== */
+function nuevoId() {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+}
+
+function escaparHtml(texto) {
+  const reemplazos = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+  return String(texto).replace(/[&<>"']/g, (caracter) => reemplazos[caracter]);
+}
+
+function fechaAIso(fecha) {
+  const mes = String(fecha.getMonth() + 1).padStart(2, "0");
+  const dia = String(fecha.getDate()).padStart(2, "0");
+  return `${fecha.getFullYear()}-${mes}-${dia}`;
+}
+
+function isoAFecha(iso) {
+  const [anio, mes, dia] = iso.split("-").map(Number);
+  return new Date(anio, mes - 1, dia);
+}
+
+function hoyIso() {
+  return fechaAIso(new Date());
+}
+
+function primerDiaDelMes(fecha) {
+  return new Date(fecha.getFullYear(), fecha.getMonth(), 1);
+}
+
+function diasHasta(iso) {
+  return Math.round((isoAFecha(iso) - isoAFecha(hoyIso())) / 86400000);
+}
+
+function textoDias(dias) {
+  if (dias === 0) return "hoy";
+  if (dias === 1) return "mañana";
+  if (dias === -1) return "ayer";
+  return dias > 1 ? `en ${dias} días` : `hace ${-dias} días`;
+}
+
+function formatearFecha(iso, opciones = { weekday: "short", day: "numeric", month: "short" }) {
+  return isoAFecha(iso).toLocaleDateString("es-AR", opciones);
+}
+
+function capitalizar(texto) {
+  return texto.charAt(0).toUpperCase() + texto.slice(1);
+}
+
+function mostrarAviso(texto) {
+  const aviso = document.getElementById("aviso");
+  aviso.textContent = texto;
+  aviso.hidden = false;
+  clearTimeout(temporizadorAviso);
+  temporizadorAviso = setTimeout(() => { aviso.hidden = true; }, 3500);
+}
+
+/* ===== 4. Consultas sobre los datos ===== */
+function materiaPorId(id) {
+  return datos.materias.find((materia) => materia.id === id);
+}
+
+function ordenarPorFechaYPrioridad(a, b) {
+  return a.fecha.localeCompare(b.fecha) || PESO_PRIORIDAD[a.prioridad] - PESO_PRIORIDAD[b.prioridad];
+}
+
+function tareasPendientes() {
+  return datos.tareas.filter((tarea) => !tarea.completada).sort(ordenarPorFechaYPrioridad);
+}
+
+function tareasCompletadas() {
+  return datos.tareas.filter((tarea) => tarea.completada).sort(ordenarPorFechaYPrioridad);
+}
+
+function examenesProximos() {
+  return datos.examenes.filter((examen) => examen.fecha >= hoyIso()).sort(ordenarPorFechaYPrioridad);
+}
+
+function examenesPasados() {
+  return datos.examenes.filter((examen) => examen.fecha < hoyIso()).sort(ordenarPorFechaYPrioridad).reverse();
+}
+
+function actividadesDelDia(iso) {
+  return {
+    tareas: datos.tareas.filter((tarea) => tarea.fecha === iso),
+    examenes: datos.examenes.filter((examen) => examen.fecha === iso)
+  };
+}
+
+/* ===== 5. Piezas de interfaz reutilizables ===== */
+function etiquetaMateria(materiaId) {
+  const materia = materiaPorId(materiaId);
+  if (!materia) return `<span class="materia">Sin materia</span>`;
+  return `<span class="materia" style="--c:${escaparHtml(materia.color)}">${escaparHtml(materia.nombre)}</span>`;
+}
+
+function etiquetaPrioridad(prioridad) {
+  const texto = PRIORIDADES.find((p) => p.valor === prioridad)?.texto || prioridad;
+  return `<span class="prio prio-${escaparHtml(prioridad)}">${texto}</span>`;
+}
+
+function selectorPrioridad(tipo, id, valorActual) {
+  const opciones = PRIORIDADES
+    .map((p) => `<option value="${p.valor}"${p.valor === valorActual ? " selected" : ""}>${p.texto}</option>`)
+    .join("");
+  return `<select class="boton chico" aria-label="Prioridad" data-accion="cambiar-prioridad" data-tipo="${tipo}" data-id="${id}">${opciones}</select>`;
+}
+
+function botonesEdicion(tipo, id) {
+  return `<button class="boton chico" data-accion="editar-${tipo}" data-id="${id}">Editar</button>
+          <button class="boton chico peligro" data-accion="eliminar-${tipo}" data-id="${id}">Eliminar</button>`;
+}
+
+function textoFecha(iso, resaltarVencida) {
+  const vencida = resaltarVencida && diasHasta(iso) < 0;
+  return `<span class="${vencida ? "vencida" : ""}">${formatearFecha(iso)} (${textoDias(diasHasta(iso))})</span>`;
+}
+
+function filaTarea(tarea, conControles) {
+  return `<li class="fila${tarea.completada ? " hecha" : ""}">
+    <input type="checkbox" class="casilla" aria-label="Completada" data-accion="alternar-tarea" data-id="${tarea.id}"${tarea.completada ? " checked" : ""}>
+    <div class="fila-texto"><strong>${escaparHtml(tarea.titulo)}</strong>
+      <div class="meta">${etiquetaMateria(tarea.materiaId)}<span>${escaparHtml(tarea.tipo)}</span>${textoFecha(tarea.fecha, !tarea.completada)}</div></div>
+    <div class="acciones">${conControles ? selectorPrioridad("tarea", tarea.id, tarea.prioridad) + botonesEdicion("tarea", tarea.id) : etiquetaPrioridad(tarea.prioridad)}</div>
+  </li>`;
+}
+
+function filaExamen(examen, conControles) {
+  const materia = materiaPorId(examen.materiaId);
+  return `<li class="fila">
+    <span class="marca-color" style="--c:${escaparHtml(materia ? materia.color : "#5B6480")}" title="Examen"></span>
+    <div class="fila-texto"><strong>Examen: ${escaparHtml(examen.titulo)}</strong>
+      <div class="meta">${etiquetaMateria(examen.materiaId)}${textoFecha(examen.fecha, false)}</div></div>
+    <div class="acciones">${conControles ? selectorPrioridad("examen", examen.id, examen.prioridad) + botonesEdicion("examen", examen.id) : etiquetaPrioridad(examen.prioridad)}</div>
+  </li>`;
+}
+
+function listaDeFilas(filas, mensajeVacio) {
+  const contenido = filas.length ? filas.join("") : `<li class="vacio-lista">${mensajeVacio}</li>`;
+  return `<ul class="lista">${contenido}</ul>`;
+}
+
+function encabezado(titulo, subtitulo, botones = "") {
+  return `<header class="encabezado"><div><h1>${titulo}</h1><div class="subtitulo">${subtitulo}</div></div><div class="barra-acciones">${botones}</div></header>`;
+}
+
+const BOTON_NUEVA_TAREA = `<button class="boton primario" data-accion="nueva-tarea">Nueva tarea</button>`;
+const BOTON_NUEVO_EXAMEN = `<button class="boton primario" data-accion="nuevo-examen">Nuevo examen</button>`;
+
+/* ===== 6. Vistas ===== */
+function vistaInicio() {
+  const total = datos.tareas.length;
+  const hechas = tareasCompletadas().length;
+  const porcentaje = total ? Math.round((hechas / total) * 100) : 0;
+  const hoy = actividadesDelDia(hoyIso());
+  const pendientes = tareasPendientes();
+  const titular = total ? `Completaste el ${porcentaje} % de tus tareas` : "Todavía no cargaste tareas";
+
+  const filasHoy = [...hoy.examenes.map((e) => filaExamen(e, false)), ...hoy.tareas.map((t) => filaTarea(t, false))];
+  const fechaHoy = capitalizar(formatearFecha(hoyIso(), { weekday: "long", day: "numeric", month: "long" }));
+
+  return `${encabezado("Inicio", fechaHoy)}${avisoDeCopia()}
+    <section aria-label="Progreso académico">
+      <p class="titular">${titular}</p>
+      <div class="barra" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${porcentaje}"><span style="width:${porcentaje}%"></span></div>
+      <p class="meta">${hechas} de ${total} completadas, ${pendientes.length} pendientes</p>
+      ${progresoPorMateria()}
+    </section>
+    <h2>Actividades de hoy</h2>
+    ${listaDeFilas(filasHoy, "No tenés actividades para hoy.")}
+    <h2>Tareas pendientes</h2>
+    ${listaDeFilas(pendientes.slice(0, 6).map((t) => filaTarea(t, false)), "No tenés tareas pendientes.")}
+    <h2>Próximos exámenes</h2>
+    ${listaDeFilas(examenesProximos().slice(0, 5).map((e) => filaExamen(e, false)), "No hay exámenes próximos.")}`;
+}
+
+function progresoPorMateria() {
+  return datos.materias.map((materia) => {
+    const tareas = datos.tareas.filter((tarea) => tarea.materiaId === materia.id);
+    if (!tareas.length) return "";
+    const hechas = tareas.filter((tarea) => tarea.completada).length;
+    const porcentaje = Math.round((hechas / tareas.length) * 100);
+    return `<div class="mini" style="--c:${escaparHtml(materia.color)}"><span>${escaparHtml(materia.nombre)}</span>
+      <div class="barra chica"><span style="width:${porcentaje}%"></span></div><span class="meta">${hechas}/${tareas.length}</span></div>`;
+  }).join("");
+}
+
+function vistaCalendario() {
+  const anio = mesVisible.getFullYear();
+  const mes = mesVisible.getMonth();
+  const diasDelMes = new Date(anio, mes + 1, 0).getDate();
+  const desfase = (new Date(anio, mes, 1).getDay() + 6) % 7; // la semana empieza el lunes
+  let celdas = DIAS_SEMANA.map((dia) => `<div class="dia-semana">${dia}</div>`).join("");
+  celdas += `<div class="cal-dia vacio"></div>`.repeat(desfase);
+
+  for (let dia = 1; dia <= diasDelMes; dia++) {
+    const iso = fechaAIso(new Date(anio, mes, dia));
+    const { tareas, examenes } = actividadesDelDia(iso);
+    const items = [
+      ...examenes.map((e) => ({ clase: "examen", titulo: `Examen: ${e.titulo}`, materiaId: e.materiaId })),
+      ...tareas.map((t) => ({ clase: t.completada ? "hecha" : "", titulo: t.titulo, materiaId: t.materiaId }))
+    ];
+    const chips = items.slice(0, 3).map((item) => {
+      const materia = materiaPorId(item.materiaId);
+      return `<span class="chip ${item.clase}" style="--c:${escaparHtml(materia ? materia.color : "#5B6480")}">${escaparHtml(item.titulo)}</span>`;
+    }).join("");
+    const resto = items.length > 3 ? `<span class="mas">+${items.length - 3}</span>` : "";
+    const clases = ["cal-dia", iso === hoyIso() ? "hoy" : "", iso === diaSeleccionado ? "seleccionado" : ""].join(" ");
+    celdas += `<button class="${clases}" data-accion="elegir-dia" data-fecha="${iso}" aria-label="${dia}, ${items.length} actividades">
+      <span class="numero">${dia}</span><span class="chips">${chips}${resto}</span></button>`;
+  }
+
+  const delDia = actividadesDelDia(diaSeleccionado);
+  const filasDia = [...delDia.examenes.map((e) => filaExamen(e, true)), ...delDia.tareas.map((t) => filaTarea(t, true))];
+  const nombreMes = capitalizar(mesVisible.toLocaleDateString("es-AR", { month: "long", year: "numeric" }));
+  const navegacion = `<button class="boton" data-accion="mes-anterior" aria-label="Mes anterior">‹</button>
+    <button class="boton" data-accion="mes-hoy">Hoy</button>
+    <button class="boton" data-accion="mes-siguiente" aria-label="Mes siguiente">›</button>`;
+
+  return `${encabezado("Calendario", nombreMes, navegacion)}
+    <div class="cal">${celdas}</div>
+    <h2>${capitalizar(formatearFecha(diaSeleccionado, { weekday: "long", day: "numeric", month: "long" }))}</h2>
+    ${listaDeFilas(filasDia, "No hay actividades este día.")}
+    <div class="barra-acciones" style="margin-top:1rem">${BOTON_NUEVA_TAREA}${BOTON_NUEVO_EXAMEN}</div>`;
+}
+
+function vistaTareas() {
+  return `${encabezado("Tareas", "Tareas y trabajos prácticos", BOTON_NUEVA_TAREA)}
+    <h2>Pendientes</h2>
+    ${listaDeFilas(tareasPendientes().map((t) => filaTarea(t, true)), "No tenés tareas pendientes.")}
+    <h2>Completadas</h2>
+    ${listaDeFilas(tareasCompletadas().map((t) => filaTarea(t, true)), "Todavía no completaste ninguna tarea.")}`;
+}
+
+function vistaExamenes() {
+  return `${encabezado("Exámenes", "Fechas de evaluación por materia", BOTON_NUEVO_EXAMEN)}
+    <h2>Próximos</h2>
+    ${listaDeFilas(examenesProximos().map((e) => filaExamen(e, true)), "No hay exámenes próximos.")}
+    <h2>Pasados</h2>
+    ${listaDeFilas(examenesPasados().map((e) => filaExamen(e, true)), "No hay exámenes pasados.")}`;
+}
+
+function vistaMaterias() {
+  const filas = datos.materias.map((materia) => {
+    const cantidadTareas = datos.tareas.filter((t) => t.materiaId === materia.id).length;
+    const cantidadExamenes = datos.examenes.filter((e) => e.materiaId === materia.id).length;
+    return `<li class="fila">
+      <span class="marca-color" style="--c:${escaparHtml(materia.color)}"></span>
+      <div class="fila-texto"><strong>${escaparHtml(materia.nombre)}</strong>
+        <div class="meta"><span>${cantidadTareas} tareas</span><span>${cantidadExamenes} exámenes</span></div></div>
+      <div class="acciones">${botonesEdicion("materia", materia.id)}</div></li>`;
+  });
+  const boton = `<button class="boton primario" data-accion="nueva-materia">Nueva materia</button>`;
+  return `${encabezado("Materias", "Las materias que cursás", boton)}
+    ${listaDeFilas(filas, "Todavía no creaste materias. Empezá agregando la primera.")}`;
+}
+
+const VISTAS = {
+  inicio: vistaInicio,
+  calendario: vistaCalendario,
+  tareas: vistaTareas,
+  examenes: vistaExamenes,
+  materias: vistaMaterias,
+  datos: vistaDatos
+};
+
+function vistaDatos() {
+  return `${encabezado("Datos", "Sincronización y copias de seguridad")}${seccionSincronizacion()}${seccionCopias()}`;
+}
+
+function render() {
+  document.querySelectorAll(".menu [data-vista]").forEach((boton) => {
+    const activa = boton.dataset.vista === vistaActual;
+    boton.classList.toggle("activa", activa);
+    if (activa) boton.setAttribute("aria-current", "page"); else boton.removeAttribute("aria-current");
+  });
+  document.getElementById("contenido").innerHTML = VISTAS[vistaActual]();
+}
+
+/* ===== 7. Formularios (ventana de diálogo) ===== */
+function abrirFormulario({ titulo, mensaje = "", campos = [], valores = {}, textoBoton = "Guardar", peligro = false, alGuardar }) {
+  const dialogo = document.getElementById("dialogo");
+  const camposHtml = campos.map((campo) => {
+    const valor = valores[campo.nombre] ?? "";
+    const control = campo.tipo === "select"
+      ? `<select name="${campo.nombre}" required>${campo.opciones.map((o) =>
+          `<option value="${escaparHtml(o.valor)}"${o.valor === valor ? " selected" : ""}>${escaparHtml(o.texto)}</option>`).join("")}</select>`
+      : `<input name="${campo.nombre}" type="${campo.tipo}" value="${escaparHtml(valor)}" required${campo.tipo === "text" ? ' maxlength="80" autocomplete="off"' : ""}>`;
+    return `<label>${campo.etiqueta}${control}</label>`;
+  }).join("");
+
+  dialogo.innerHTML = `<form><h2>${titulo}</h2>${mensaje ? `<p>${mensaje}</p>` : ""}${camposHtml}
+    <div class="acciones-dialogo"><button type="button" class="boton" data-accion="cerrar-dialogo">Cancelar</button>
+    <button class="boton ${peligro ? "eliminar" : "primario"}">${textoBoton}</button></div></form>`;
+
+  dialogo.querySelector("form").addEventListener("submit", (evento) => {
+    evento.preventDefault();
+    const valoresIngresados = Object.fromEntries(new FormData(evento.target));
+    Object.keys(valoresIngresados).forEach((clave) => { valoresIngresados[clave] = valoresIngresados[clave].trim(); });
+    if (campos.some((c) => c.tipo === "text" && !valoresIngresados[c.nombre])) return;
+    dialogo.close();
+    alGuardar(valoresIngresados);
+  });
+  dialogo.showModal();
+}
+
+function confirmarEliminacion(mensaje, alAceptar) {
+  abrirFormulario({ titulo: "Eliminar", mensaje, textoBoton: "Eliminar", peligro: true, alGuardar: alAceptar });
+}
+
+function opcionesDeMaterias() {
+  return datos.materias.map((materia) => ({ valor: materia.id, texto: materia.nombre }));
+}
+
+function hayMaterias() {
+  if (datos.materias.length) return true;
+  vistaActual = "materias";
+  render();
+  mostrarAviso("Primero creá una materia para poder asociarle actividades.");
+  return false;
+}
+
+function formularioMateria(materia) {
+  const colorInicial = COLORES_MATERIA[datos.materias.length % COLORES_MATERIA.length];
+  abrirFormulario({
+    titulo: materia ? "Editar materia" : "Nueva materia",
+    campos: [
+      { nombre: "nombre", etiqueta: "Nombre", tipo: "text" },
+      { nombre: "color", etiqueta: "Color", tipo: "color" }
+    ],
+    valores: materia || { color: colorInicial },
+    alGuardar(valores) {
+      if (materia) Object.assign(materia, estampar(valores));
+      else datos.materias.push({ id: nuevoId(), ...estampar(valores) });
+      guardarYRenderizar();
+    }
+  });
+}
+
+function formularioTarea(tarea) {
+  if (!hayMaterias()) return;
+  const fechaInicial = vistaActual === "calendario" ? diaSeleccionado : hoyIso();
+  abrirFormulario({
+    titulo: tarea ? "Editar tarea" : "Nueva tarea",
+    campos: [
+      { nombre: "titulo", etiqueta: "Título", tipo: "text" },
+      { nombre: "tipo", etiqueta: "Tipo", tipo: "select", opciones: TIPOS_TAREA.map((t) => ({ valor: t, texto: t })) },
+      { nombre: "materiaId", etiqueta: "Materia", tipo: "select", opciones: opcionesDeMaterias() },
+      { nombre: "fecha", etiqueta: "Fecha de entrega", tipo: "date" },
+      { nombre: "prioridad", etiqueta: "Prioridad", tipo: "select", opciones: PRIORIDADES.map((p) => ({ valor: p.valor, texto: p.texto })) }
+    ],
+    valores: tarea || { tipo: TIPOS_TAREA[0], materiaId: datos.materias[0].id, fecha: fechaInicial, prioridad: "media" },
+    alGuardar(valores) {
+      if (tarea) Object.assign(tarea, estampar(valores));
+      else datos.tareas.push({ id: nuevoId(), completada: false, ...estampar(valores) });
+      guardarYRenderizar();
+    }
+  });
+}
+
+function formularioExamen(examen) {
+  if (!hayMaterias()) return;
+  const fechaInicial = vistaActual === "calendario" ? diaSeleccionado : hoyIso();
+  abrirFormulario({
+    titulo: examen ? "Editar examen" : "Nuevo examen",
+    campos: [
+      { nombre: "titulo", etiqueta: "Título", tipo: "text" },
+      { nombre: "materiaId", etiqueta: "Materia", tipo: "select", opciones: opcionesDeMaterias() },
+      { nombre: "fecha", etiqueta: "Fecha del examen", tipo: "date" },
+      { nombre: "prioridad", etiqueta: "Prioridad", tipo: "select", opciones: PRIORIDADES.map((p) => ({ valor: p.valor, texto: p.texto })) }
+    ],
+    valores: examen || { materiaId: datos.materias[0].id, fecha: fechaInicial, prioridad: "alta" },
+    alGuardar(valores) {
+      if (examen) Object.assign(examen, estampar(valores));
+      else datos.examenes.push({ id: nuevoId(), ...estampar(valores) });
+      guardarYRenderizar();
+    }
+  });
+}
+
+function eliminarMateria(materia) {
+  const tareas = datos.tareas.filter((t) => t.materiaId === materia.id).length;
+  const examenes = datos.examenes.filter((e) => e.materiaId === materia.id).length;
+  const detalle = tareas || examenes ? ` También se eliminarán sus ${tareas} tareas y ${examenes} exámenes.` : "";
+  confirmarEliminacion(`¿Eliminar la materia “${escaparHtml(materia.nombre)}”?${detalle}`, () => {
+    registrarEliminaciones([materia, ...datos.tareas.filter((t) => t.materiaId === materia.id), ...datos.examenes.filter((e) => e.materiaId === materia.id)]);
+    datos.materias = datos.materias.filter((m) => m.id !== materia.id);
+    datos.tareas = datos.tareas.filter((t) => t.materiaId !== materia.id);
+    datos.examenes = datos.examenes.filter((e) => e.materiaId !== materia.id);
+    guardarYRenderizar();
+  });
+}
+
+function eliminarElemento(coleccion, id, descripcion) {
+  const elemento = datos[coleccion].find((e) => e.id === id);
+  confirmarEliminacion(`¿Eliminar ${descripcion} “${escaparHtml(elemento.titulo)}”?`, () => {
+    registrarEliminaciones([elemento]);
+    datos[coleccion] = datos[coleccion].filter((e) => e.id !== id);
+    guardarYRenderizar();
+  });
+}
+
+/* ===== 8. Acciones y eventos ===== */
+function cambiarMes(cantidad) {
+  mesVisible = new Date(mesVisible.getFullYear(), mesVisible.getMonth() + cantidad, 1);
+  render();
+}
+
+const ACCIONES = {
+  "ir": ({ vista }) => { vistaActual = vista; render(); window.scrollTo(0, 0); },
+  "cerrar-dialogo": () => document.getElementById("dialogo").close(),
+  "nueva-materia": () => formularioMateria(null),
+  "editar-materia": ({ id }) => formularioMateria(materiaPorId(id)),
+  "eliminar-materia": ({ id }) => eliminarMateria(materiaPorId(id)),
+  "nueva-tarea": () => formularioTarea(null),
+  "editar-tarea": ({ id }) => formularioTarea(datos.tareas.find((t) => t.id === id)),
+  "eliminar-tarea": ({ id }) => eliminarElemento("tareas", id, "la tarea"),
+  "nuevo-examen": () => formularioExamen(null),
+  "editar-examen": ({ id }) => formularioExamen(datos.examenes.find((e) => e.id === id)),
+  "eliminar-examen": ({ id }) => eliminarElemento("examenes", id, "el examen"),
+  "iniciar-sesion": () => formularioInicioSesion(),
+  "cerrar-sesion": () => cerrarSesion(),
+  "sincronizar": () => sincronizarAhora(),
+  "exportar": () => exportarCopia(),
+  "importar": () => document.getElementById("archivo-importacion").click(),
+  "mes-anterior": () => cambiarMes(-1),
+  "mes-siguiente": () => cambiarMes(1),
+  "mes-hoy": () => { mesVisible = primerDiaDelMes(new Date()); diaSeleccionado = hoyIso(); render(); },
+  "elegir-dia": ({ fecha }) => { diaSeleccionado = fecha; render(); }
+};
+
+document.addEventListener("click", (evento) => {
+  const elemento = evento.target.closest("[data-accion]");
+  if (!elemento || elemento.matches("select, input")) return; // esos se resuelven en "change"
+  ACCIONES[elemento.dataset.accion]?.(elemento.dataset);
+});
+
+document.addEventListener("change", (evento) => {
+  const elemento = evento.target.closest("[data-accion]");
+  if (!elemento) return;
+  const { accion, id, tipo } = elemento.dataset;
+
+  if (accion === "alternar-tarea") {
+    const tarea = datos.tareas.find((t) => t.id === id);
+    tarea.completada = elemento.checked;
+    tarea.modificado = Date.now();
+  } else if (accion === "cambiar-prioridad") {
+    const coleccion = tipo === "tarea" ? datos.tareas : datos.examenes;
+    const item = coleccion.find((e) => e.id === id);
+    item.prioridad = elemento.value;
+    item.modificado = Date.now();
+  } else if (accion === "elegir-archivo") {
+    importarCopia(elemento.files[0]);
+    elemento.value = "";
+    return;
+  } else {
+    return;
+  }
+  guardarYRenderizar();
+  document.querySelector(`[data-accion="${accion}"][data-id="${id}"]`)?.focus();
+});
+
+/* ===== 9. Inicio de la aplicación ===== */
+cargarDatos();
+render();
+navigator.storage?.persist?.(); // pide al navegador que no borre los datos por falta de espacio
+iniciarSincronizacion();
