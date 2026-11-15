@@ -12,6 +12,7 @@ body{margin:0;background:var(--fondo);color:var(--tinta);font:16px/1.5 "Bricolag
 .menu{position:sticky;top:0;height:100vh;align-self:start;padding:1.5rem 1rem;background:var(--superficie);border-right:1px solid var(--linea)}
 .menu .marca{margin:0 0 1.5rem;padding:0 .5rem;font-size:1.7rem;font-weight:800;letter-spacing:-.03em;color:var(--tinta);cursor:pointer}
 .menu nav{display:flex;flex-direction:column;gap:.25rem}
+.menu .solo-movil{display:none}
 .menu button{font:inherit;text-align:left;padding:.6rem .8rem;border:0;border-radius:8px;background:none;color:var(--suave);cursor:pointer}
 .menu button.activa{background:var(--fondo);color:var(--tinta);font-weight:600}
 main{width:100%;max-width:60rem;padding:2rem clamp(1rem,4vw,3rem) 3rem}
@@ -95,6 +96,14 @@ code{padding:0 .25rem;border-radius:4px;background:var(--fondo)}
 .grilla-cuerpo{position:relative;height:calc(var(--horas) * var(--alto-hora));background-image:repeating-linear-gradient(to bottom,var(--linea) 0 1px,transparent 1px var(--alto-hora))}
 .bloque{position:absolute;left:2px;right:2px;display:flex;flex-direction:column;overflow:hidden;padding:.15rem .3rem;border:0;border-radius:6px;background:var(--c);color:#fff;font:inherit;font-size:.72rem;text-align:left;cursor:pointer}
 .bloque span{font-size:.66rem;opacity:.85}
+.tarjeta-materia{cursor:pointer}
+.tarjeta-materia:hover,.tarjeta-materia.abierta{background:color-mix(in srgb,var(--c) 7%,var(--superficie))}
+.nombre-materia{padding:0;border:0;background:none;color:inherit;font:inherit;text-align:left;cursor:pointer}
+.detalle-materia{position:relative;padding:1rem 1.25rem 1.25rem;border-top:1px solid var(--linea);border-left:4px solid var(--c);background:var(--fondo);list-style:none}
+.detalle-materia+.fila{border-top:1px solid var(--linea)}
+.detalle-titulo{padding-right:2.5rem;font-size:1.05rem;font-weight:800;letter-spacing:-.01em}
+.detalle-materia h3{margin:1rem 0 .5rem;font-size:.92rem;font-weight:600;color:var(--suave)}
+.cerrar-detalle{position:absolute;top:.6rem;right:.75rem;width:2rem;height:2rem;padding:0;border-radius:99px;line-height:1}
 .vacio-lista{padding:1.25rem 1rem;color:var(--suave)}
 
 /* ===== Panel de inicio ===== */
@@ -118,11 +127,35 @@ code{padding:0 .25rem;border-radius:4px;background:var(--fondo)}
 .chip.hecha{opacity:.5;text-decoration:line-through}
 .mas{font-size:.7rem;color:var(--suave)}
 
+/* ===== Presentación ===== */
+.presentacion{display:grid;gap:1.5rem}
+.portada{padding:clamp(1.5rem,5vw,3rem);border:1px solid var(--linea);border-radius:20px;background:radial-gradient(120% 140% at 100% 0%,color-mix(in srgb,var(--acento) 14%,transparent),transparent 60%),var(--superficie)}
+.marca-grande{display:flex;align-items:center;gap:.75rem}
+.logo{width:3rem;height:3rem;flex:0 0 auto}
+.logo-fondo{fill:var(--acento)}
+.logo-trazo{fill:none;stroke:var(--sobre-acento);stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}
+.nombre{font-size:1.9rem;font-weight:800;letter-spacing:-.03em}
+.nombre span{color:var(--acento)}
+.etiqueta{margin:1.75rem 0 .5rem;font-size:.85rem;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--acento)}
+.portada h1{max-width:18ch;font-size:clamp(2.2rem,6vw,3.6rem)}
+.bajada{max-width:42rem;margin:1rem 0 1.5rem;font-size:1.08rem;color:var(--suave)}
+.boton.grande{padding:.75rem 1.5rem;font-size:1.05rem}
+.titulo-funciones{margin:.5rem 0 0}
+.funciones{display:grid;grid-template-columns:repeat(auto-fit,minmax(15rem,1fr));gap:.75rem;margin:0;padding:0;list-style:none}
+.funcion{display:grid;gap:.35rem;align-content:start;width:100%;height:100%;padding:1.1rem;border:1px solid var(--linea);border-radius:14px;background:var(--superficie);color:var(--tinta);font:inherit;text-align:left;cursor:pointer;transition:border-color .15s,transform .15s}
+.funcion:hover{border-color:var(--c);transform:translateY(-2px)}
+.funcion strong{font-size:1.05rem}
+.funcion>span:last-child{font-size:.9rem;color:var(--suave)}
+.funcion-icono{display:grid;place-items:center;width:2.5rem;height:2.5rem;margin-bottom:.4rem;border-radius:10px;background:color-mix(in srgb,var(--c) 14%,var(--superficie));color:color-mix(in srgb,var(--c) 65%,var(--tinta))}
+.funcion-icono svg{width:1.4rem;height:1.4rem;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.pie-presentacion{margin:.5rem 0 0;text-align:center;font-size:.88rem;color:var(--suave)}
+
 /* ===== Adaptación a celulares ===== */
 @media (max-width:760px){
   .app{grid-template-columns:1fr}
   .menu{position:fixed;top:auto;right:0;bottom:0;left:0;z-index:10;height:auto;padding:.25rem .25rem calc(.25rem + env(safe-area-inset-bottom,0px));border-right:0;border-top:1px solid var(--linea)}
   .menu .marca{display:none}
+  .menu .solo-movil{display:block}
   .menu nav{flex-direction:row;overflow-x:auto}
   .menu button{flex:0 0 auto;padding:.5rem .7rem;font-size:.74rem;text-align:center}
   main{padding-bottom:6rem}

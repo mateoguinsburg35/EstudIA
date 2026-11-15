@@ -16,11 +16,12 @@ const DIAS_SEMANA = ["lun", "mar", "mié", "jue", "vie", "sáb", "dom"];
 const COLECCIONES = ["materias", "tareas", "examenes", "horarios"];
 const CLAVE_META = "estudia:meta:v1"; // datos propios de este dispositivo (no se sincronizan)
 let datos = { materias: [], tareas: [], examenes: [], horarios: [], eliminados: {} };
-let vistaActual = "inicio";
+let vistaActual = "presentacion"; // lo primero que se ve es la presentación
 let mesVisible = primerDiaDelMes(new Date());
 let diaSeleccionado = hoyIso();
 let temporizadorAviso = null;
 let accionDeshacer = null;
+let materiaAbierta = null; // id de la materia cuyo detalle se está mostrando
 
 function cargarDatos() {
   try {
@@ -254,7 +255,7 @@ function vistaInicio() {
   const filasHoy = [...clasesDeHoy().map((c) => filaClase(c, false)), ...hoy.examenes.map((e) => filaExamen(e, false)), ...hoy.tareas.map((t) => filaTarea(t, false))];
   const fechaHoy = capitalizar(formatearFecha(hoyIso(), { weekday: "long", day: "numeric", month: "long" }));
 
-  return `${encabezado("Inicio", fechaHoy)}${avisoDeCopia()}
+  return `${encabezado("Panel diario", fechaHoy)}${avisoDeCopia()}
     <section aria-label="Progreso académico">
       <p class="titular">${titular}</p>
       <div class="barra" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${porcentaje}"><span style="width:${porcentaje}%"></span></div>
@@ -331,18 +332,33 @@ function vistaMaterias() {
   const filas = datos.materias.map((materia) => {
     const cantidadTareas = datos.tareas.filter((t) => t.materiaId === materia.id).length;
     const cantidadExamenes = datos.examenes.filter((e) => e.materiaId === materia.id).length;
-    return `<li class="fila">
+    const abierta = materia.id === materiaAbierta;
+    return `<li class="fila tarjeta-materia${abierta ? " abierta" : ""}" style="--c:${escaparHtml(materia.color)}" data-accion="alternar-materia" data-id="${materia.id}">
       <span class="marca-color" style="--c:${escaparHtml(materia.color)}"></span>
-      <div class="fila-texto"><strong>${escaparHtml(materia.nombre)}</strong>
+      <div class="fila-texto"><button class="nombre-materia" data-accion="alternar-materia" data-id="${materia.id}" aria-expanded="${abierta}"><strong>${escaparHtml(materia.nombre)}</strong></button>
         <div class="meta"><span>${cantidadTareas} tareas</span><span>${cantidadExamenes} exámenes</span></div></div>
-      <div class="acciones">${botonesEdicion("materia", materia.id)}</div></li>`;
+      <div class="acciones">${botonesEdicion("materia", materia.id)}</div></li>${abierta ? detalleMateria(materia) : ""}`;
   });
   const boton = `<button class="boton primario" data-accion="nueva-materia">Nueva materia</button>`;
   return `${encabezado("Materias", "Las materias que cursás", boton)}
     ${listaDeFilas(filas, "Todavía no creaste materias. Empezá agregando la primera.")}`;
 }
 
+/* Detalle de una materia: sus tareas pendientes y sus próximos exámenes. */
+function detalleMateria(materia) {
+  const tareas = tareasPendientes().filter((tarea) => tarea.materiaId === materia.id);
+  const examenes = examenesProximos().filter((examen) => examen.materiaId === materia.id);
+  return `<li class="detalle-materia" style="--c:${escaparHtml(materia.color)}">
+    <button class="boton chico cerrar-detalle" data-accion="cerrar-materia" aria-label="Cerrar detalle">✕</button>
+    <div class="detalle-titulo">${escaparHtml(materia.nombre)}</div>
+    <h3>Tareas pendientes (${tareas.length})</h3>
+    ${listaDeFilas(tareas.map((t) => filaTarea(t, true)), "No hay tareas pendientes en esta materia.")}
+    <h3>Próximos exámenes (${examenes.length})</h3>
+    ${listaDeFilas(examenes.map((e) => filaExamen(e, true)), "No hay exámenes próximos en esta materia.")}</li>`;
+}
+
 const VISTAS = {
+  presentacion: vistaPresentacion,
   inicio: vistaInicio,
   calendario: vistaCalendario,
   tareas: vistaTareas,
@@ -538,6 +554,8 @@ const ACCIONES = {
   "nueva-materia": () => formularioMateria(null),
   "editar-materia": ({ id }) => formularioMateria(materiaPorId(id)),
   "eliminar-materia": ({ id }) => eliminarMateria(materiaPorId(id)),
+  "alternar-materia": ({ id }) => { materiaAbierta = materiaAbierta === id ? null : id; render(); },
+  "cerrar-materia": () => { materiaAbierta = null; render(); },
   "nueva-tarea": () => formularioTarea(null),
   "editar-tarea": ({ id }) => formularioTarea(datos.tareas.find((t) => t.id === id)),
   "eliminar-tarea": ({ id }) => eliminarElemento("tareas", id, "la tarea"),
