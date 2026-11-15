@@ -188,7 +188,7 @@ function selectorPrioridad(tipo, id, valorActual) {
   const opciones = PRIORIDADES
     .map((p) => `<option value="${p.valor}"${p.valor === valorActual ? " selected" : ""}>${p.texto}</option>`)
     .join("");
-  return `<select class="boton chico" aria-label="Prioridad" data-accion="cambiar-prioridad" data-tipo="${tipo}" data-id="${id}">${opciones}</select>`;
+  return `<select class="boton chico prio-sel prio-${escaparHtml(valorActual)}" aria-label="Prioridad" data-accion="cambiar-prioridad" data-tipo="${tipo}" data-id="${id}">${opciones}</select>`;
 }
 
 function botonesEdicion(tipo, id) {
@@ -212,7 +212,7 @@ function descripcionHtml(item) {
 }
 
 function filaTarea(tarea, conControles) {
-  return `<li class="fila${tarea.completada ? " hecha" : ""}">
+  return `<li class="fila fila-prio-${escaparHtml(tarea.prioridad)}${tarea.completada ? " hecha" : ""}">
     <input type="checkbox" class="casilla" aria-label="Completada" data-accion="alternar-tarea" data-id="${tarea.id}"${tarea.completada ? " checked" : ""}>
     <div class="fila-texto"><strong>${escaparHtml(tarea.titulo)}</strong>
       <div class="meta">${etiquetaMateria(tarea.materiaId)}<span>${escaparHtml(tarea.tipo)}</span>${textoFecha(tarea.fecha, !tarea.completada)}</div>${descripcionHtml(tarea)}</div>
@@ -222,7 +222,7 @@ function filaTarea(tarea, conControles) {
 
 function filaExamen(examen, conControles) {
   const materia = materiaPorId(examen.materiaId);
-  return `<li class="fila">
+  return `<li class="fila fila-prio-${escaparHtml(examen.prioridad)}">
     <span class="marca-color" style="--c:${escaparHtml(materia ? materia.color : "#5B6480")}" title="Examen"></span>
     <div class="fila-texto"><strong>Examen: ${escaparHtml(examen.titulo)}</strong>
       <div class="meta">${etiquetaMateria(examen.materiaId)}${textoFecha(examen.fecha, false)}</div>${descripcionHtml(examen)}</div>
@@ -372,6 +372,11 @@ function abrirFormulario({ titulo, mensaje = "", campos = [], valores = {}, text
   const dialogo = document.getElementById("dialogo");
   const camposHtml = campos.map((campo) => {
     const valor = valores[campo.nombre] ?? "";
+    if (campo.tipo === "dias") {
+      const marcados = Array.isArray(valor) ? valor : [];
+      return `<fieldset class="dias"><legend>${campo.etiqueta}</legend><div class="dias-opciones">${campo.opciones.map((o) =>
+        `<label class="dia-opcion"><input type="checkbox" name="${campo.nombre}" value="${escaparHtml(o.valor)}" aria-label="${escaparHtml(o.texto)}"${marcados.includes(o.valor) ? " checked" : ""}><span>${escaparHtml(o.texto.slice(0, 3))}</span></label>`).join("")}</div></fieldset>`;
+    }
     const requerido = campo.opcional ? "" : " required";
     let control;
     if (campo.tipo === "select") {
@@ -391,8 +396,10 @@ function abrirFormulario({ titulo, mensaje = "", campos = [], valores = {}, text
 
   dialogo.querySelector("form").addEventListener("submit", (evento) => {
     evento.preventDefault();
-    const valoresIngresados = Object.fromEntries(new FormData(evento.target));
+    const formulario = new FormData(evento.target);
+    const valoresIngresados = Object.fromEntries(formulario);
     Object.keys(valoresIngresados).forEach((clave) => { valoresIngresados[clave] = valoresIngresados[clave].trim(); });
+    campos.filter((c) => c.tipo === "dias").forEach((c) => { valoresIngresados[c.nombre] = formulario.getAll(c.nombre); }); // casillas múltiples
     if (campos.some((c) => c.tipo === "text" && !valoresIngresados[c.nombre])) return;
     dialogo.close();
     alGuardar(valoresIngresados);
@@ -540,7 +547,7 @@ const ACCIONES = {
   "deshacer": () => { accionDeshacer?.(); accionDeshacer = null; document.getElementById("aviso").hidden = true; },
   "nueva-clase": () => formularioClase(null),
   "editar-horario": ({ id }) => formularioClase(datos.horarios.find((c) => c.id === id)),
-  "eliminar-horario": ({ id }) => eliminarElemento("horarios", id, "la clase"),
+  "eliminar-horario": ({ id }) => eliminarClase(id),
   "enfoque-iniciar": () => iniciarEnfoque(),
   "enfoque-pausar": () => pausarEnfoque(),
   "enfoque-reiniciar": () => reiniciarEnfoque(),
