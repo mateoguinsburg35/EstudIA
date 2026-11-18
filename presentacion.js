@@ -1,9 +1,5 @@
 /* Página de presentación de EstudIA: es lo primero que se ve al entrar y se vuelve a abrir desde el logo. */
-const LOGO_ESTUDIA = `<svg class="logo" viewBox="0 0 48 48" role="img" aria-label="Logo de EstudIA">
-  <rect class="logo-fondo" width="48" height="48" rx="13"/>
-  <path class="logo-trazo" d="M24 16c-3.2-2.5-7.4-3.2-11.5-2.6v18.2c4.1-.6 8.3.1 11.5 2.6 3.2-2.5 7.4-3.2 11.5-2.6V13.4c-4.1-.6-8.3.1-11.5 2.6z"/>
-  <path class="logo-trazo" d="M24 16v18.6"/>
-</svg>`;
+const LOGO_ESTUDIA = `<img class="logo" src="img/logo.png" alt="Logo de EstudIA">`;
 
 const ICONOS_PRESENTACION = {
   materias: `<path d="M4 19V5a2 2 0 0 1 2-2h13v14H6a2 2 0 0 0-2 2zm0 0a2 2 0 0 0 2 2h13"/>`,
